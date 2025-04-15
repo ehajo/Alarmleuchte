@@ -1,18 +1,32 @@
 #include <ESP8266WiFi.h>
 #include <ArduinoOTA.h>
-#include "config.h"  // Enthält deine sensiblen Zugangsdaten
+#include "config.h"  // Enthält WLAN- und Twitch-Zugangsdaten
 
 #define RELAY_PIN 16  // IO16: Relais-Steuerung
+#define DEBUG         // Aktiviere Debug-Ausgaben
+#ifdef DEBUG
+  #define DEBUG_PRINT(x) Serial.println(x)
+#else
+  #define DEBUG_PRINT(x)
+#endif
 
+// Twitch IRC-Server-Daten
 const char* twitch_server = "irc.chat.twitch.tv";
-const int   twitch_port   = 6667;
+const int twitch_port = 6667;
 
+// Custom Reward ID
+const char* customRewardId = "123123123";  // Beispiel: "abc123def456"
+
+// Zeitkonstanten
+const unsigned long ALARM_DURATION_MS = 10000UL;
+const unsigned long OTA_CHECK_INTERVAL_MS = 1000UL;
+
+// WiFi-Client
 WiFiClient client;
 
 // Variablen für den nicht-blockierenden Alarm
-bool alarmActive = false;         
-unsigned long alarmStartTime = 0; 
-unsigned long lastAlarmTime = 0;
+bool alarmActive = false;
+unsigned long alarmStartTime = 0;
 
 void setup() {
   Serial.begin(115200);
@@ -22,115 +36,148 @@ void setup() {
   digitalWrite(RELAY_PIN, LOW);
 
   // Mit WLAN verbinden
-  Serial.print("Verbinde mit WLAN...");
+  DEBUG_PRINT(F("Verbinde mit WLAN..."));
+  unsigned long wifiTimeout = millis();
   WiFi.begin(ssid, wifi_password);
-  while (WiFi.status() != WL_CONNECTED) {
+  while (WiFi.status() != WL_CONNECTED && millis() - wifiTimeout < 30000) {
     delay(500);
     Serial.print(".");
   }
-  Serial.println("\nWLAN verbunden!");
+  if (WiFi.status() != WL_CONNECTED) {
+    DEBUG_PRINT(F("WLAN-Verbindung fehlgeschlagen! Neustart..."));
+    ESP.restart();
+  }
+  DEBUG_PRINT(F("\nWLAN verbunden!"));
 
   // Einrichtung von OTA
-  ArduinoOTA.onStart([]() {
-    Serial.println("OTA Update startet...");
-  });
-  ArduinoOTA.onEnd([]() {
-    Serial.println("\nOTA Update abgeschlossen!");
-  });
+  ArduinoOTA.onStart([]() { DEBUG_PRINT(F("OTA Update startet...")); });
+  ArduinoOTA.onEnd([]() { DEBUG_PRINT(F("\nOTA Update abgeschlossen!")); });
   ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
     Serial.printf("OTA Update: %u%%\r", (progress * 100) / total);
   });
   ArduinoOTA.onError([](ota_error_t error) {
     Serial.printf("OTA Fehler[%u]: ", error);
-    if (error == OTA_AUTH_ERROR)    Serial.println("Auth Fehler");
-    else if (error == OTA_BEGIN_ERROR)   Serial.println("Begin Fehler");
-    else if (error == OTA_CONNECT_ERROR) Serial.println("Connect Fehler");
-    else if (error == OTA_RECEIVE_ERROR) Serial.println("Receive Fehler");
-    else if (error == OTA_END_ERROR)     Serial.println("End Fehler");
+    if (error == OTA_AUTH_ERROR) DEBUG_PRINT(F("Auth Fehler"));
+    else if (error == OTA_BEGIN_ERROR) DEBUG_PRINT(F("Begin Fehler"));
+    else if (error == OTA_CONNECT_ERROR) DEBUG_PRINT(F("Connect Fehler"));
+    else if (error == OTA_RECEIVE_ERROR) DEBUG_PRINT(F("Receive Fehler"));
+    else if (error == OTA_END_ERROR) DEBUG_PRINT(F("End Fehler"));
   });
-  ArduinoOTA.setPassword("1234");
-
+  ArduinoOTA.setPassword("mein_heimliches_passwort"); // Sicherheit
   ArduinoOTA.begin();
 
-  // Verbindung zum Twitch IRC-Server herstellen
-  Serial.print("Verbinde zu Twitch IRC...");
+  // Verbindung zum Twitch IRC-Server
+  connectToTwitch();
+}
+
+void connectToTwitch() {
+  DEBUG_PRINT(F("Verbinde zu Twitch IRC..."));
+  client.stop(); // Vorherige Verbindung schließen
   if (client.connect(twitch_server, twitch_port)) {
-    Serial.println("verbunden!");
-    client.println("PASS " + String(twitch_oauth));
-    client.println("NICK " + String(twitch_username));
-    client.println("CAP REQ :twitch.tv/tags");
-    client.println("JOIN " + String(twitch_channel));
-
-    // Sende Chat-Nachricht, dass der Alarm online ist
-    client.println("PRIVMSG " + String(twitch_channel) + " :Alarm online 🚨🚨🚨");
-    Serial.println("Chat-Nachricht 'Alarm online 🚨🚨🚨' versendet.");
-
-    // Erlaube, dass der erste !alarm-Befehl direkt ausgeführt werden kann
-    lastAlarmTime = millis() - 60000UL;
+    DEBUG_PRINT(F("verbunden!"));
+    client.print(F("PASS "));
+    client.println(twitch_oauth);
+    client.print(F("NICK "));
+    client.println(twitch_username);
+    client.println(F("CAP REQ :twitch.tv/tags twitch.tv/commands"));
+    client.print(F("JOIN "));
+    client.println(twitch_channel);
   } else {
-    Serial.println("Verbindung zu Twitch IRC fehlgeschlagen!");
+    DEBUG_PRINT(F("Verbindung zu Twitch IRC fehlgeschlagen!"));
   }
 }
 
-void loop() {
-  // OTA-Updates verarbeiten
-  ArduinoOTA.handle();
+void handlePing(const String& line) {
+  if (line.startsWith("PING")) {
+    client.println(F("PONG :tmi.twitch.tv"));
+    DEBUG_PRINT(F("PING beantwortet."));
+  }
+}
 
-  // OTA sollte Vorrang haben, aber hier verarbeiten wir dennoch die Twitch-Nachrichten
-  if (alarmActive) {
-    while (client.available()) {
-      String line = client.readStringUntil('\n');
-      line.trim();
-      if (line.startsWith("PING")) {
-        client.println("PONG :tmi.twitch.tv");
-        Serial.println("PING beantwortet (während Alarm).");
-      } else {
-        Serial.println("Nachricht während Alarm verworfen: " + line);
-      }
-    }
-    if (millis() - alarmStartTime >= 10000UL) {  // 10 Sekunden
-      digitalWrite(RELAY_PIN, LOW);
-      alarmActive = false;
-      Serial.println("Alarm beendet; Relais ausgeschaltet.");
-    }
+void handleAlarm() {
+  if (alarmActive && millis() - alarmStartTime >= ALARM_DURATION_MS) {
+    digitalWrite(RELAY_PIN, LOW);
+    alarmActive = false;
+    DEBUG_PRINT(F("Alarm beendet; Relais ausgeschaltet."));
+  }
+  // Sicherheitsabschaltung
+  if (alarmActive && millis() - alarmStartTime > ALARM_DURATION_MS * 2) {
+    digitalWrite(RELAY_PIN, LOW);
+    alarmActive = false;
+    DEBUG_PRINT(F("Sicherheitsabschaltung: Relais war zu lange aktiv!"));
+  }
+}
+
+void processRewardMessage(const String& line) {
+  // Prüfe auf Custom Reward
+  int rewardIndex = line.indexOf("custom-reward-id=");
+  if (rewardIndex == -1) {
+    DEBUG_PRINT(F("Keine Custom Reward ID gefunden."));
+    return;
+  }
+
+  // Extrahiere Reward-ID
+  int rewardStart = rewardIndex + strlen("custom-reward-id=");
+  int rewardEnd = line.indexOf(";", rewardStart);
+  if (rewardEnd == -1) rewardEnd = line.length();
+  String rewardId = line.substring(rewardStart, rewardEnd);
+  if (!rewardId.equals(customRewardId)) {
+    DEBUG_PRINT(F("Custom Reward ignoriert: Falsche Reward-ID: ") + rewardId);
+    return;
+  }
+
+  // Extrahiere Benutzertext
+  int textStart = line.indexOf(" :", line.indexOf("PRIVMSG"));
+  String userText = "";
+  if (textStart != -1) {
+    userText = line.substring(textStart + 2); // Überspringe " :"
+    userText.trim();
+  }
+
+  // Reward erkannt, Relais aktivieren
+  DEBUG_PRINT(F("Custom Reward erkannt. Relais wird aktiviert."));
+  if (userText.length() > 0) {
+    DEBUG_PRINT("Benutzertext: " + userText);
   } else {
-    if (client.connected() && client.available()) {
-      String line = client.readStringUntil('\n');
-      line.trim();
-      Serial.println(line);
+    DEBUG_PRINT(F("Kein Benutzertext angegeben."));
+  }
+  digitalWrite(RELAY_PIN, HIGH);
+  client.print(F("PRIVMSG "));
+  client.print(twitch_channel);
+  client.println(F(" :🚨🚨🚨 Alarm 🚨🚨🚨"));
+  alarmStartTime = millis();
+  alarmActive = true;
+}
 
-      if (line.startsWith("PING")) {
-        client.println("PONG :tmi.twitch.tv");
-        Serial.println("PING beantwortet.");
-      }
-      else if (line.indexOf("PRIVMSG") != -1 && line.indexOf("!alarm") != -1) {
-        if (millis() - lastAlarmTime >= 60000UL) {
-          if (line.startsWith("@")) {
-            int badgesIndex = line.indexOf("badges=");
-            if (badgesIndex != -1) {
-              int endIndex = line.indexOf(";", badgesIndex);
-              String badges = (endIndex != -1)
-                              ? line.substring(badgesIndex, endIndex)
-                              : line.substring(badgesIndex);
-              if (badges.indexOf("moderator") != -1 || badges.indexOf("subscriber") != -1) {
-                Serial.println("Befehl !alarm von berechtigtem Nutzer erkannt. Relais wird aktiviert.");
-                digitalWrite(RELAY_PIN, HIGH);
-                alarmStartTime = millis();
-                lastAlarmTime  = millis();
-                alarmActive    = true;
-              } else {
-                Serial.println("Befehl !alarm ignoriert: Absender ist weder Moderator noch Subscriber.");
-              }
-            } else {
-              Serial.println("Befehl !alarm ignoriert: Keine Badge-Informationen vorhanden.");
-            }
-          } else {
-            Serial.println("Befehl !alarm ignoriert: Nachricht enthält keine Tag-Informationen.");
-          }
-        } else {
-          Serial.println("Befehl !alarm ignoriert: Bereits ein Alarm in der letzten Minute verarbeitet.");
-        }
-      }
+void loop() {
+  static unsigned long lastOtaCheck = 0;
+
+  // OTA-Updates periodisch prüfen
+  if (millis() - lastOtaCheck >= OTA_CHECK_INTERVAL_MS) {
+    ArduinoOTA.handle();
+    lastOtaCheck = millis();
+  }
+
+  // Alarmsteuerung
+  handleAlarm();
+
+  // Twitch-Verbindung prüfen
+  if (!client.connected()) {
+    connectToTwitch();
+    delay(5000); // Verzögerung vor Wiederverbindung
+    return;
+  }
+
+  // Nachrichten verarbeiten
+  if (client.available()) {
+    String line = client.readStringUntil('\n');
+    line.trim();
+    DEBUG_PRINT("Raw: " + line); // Rohdaten für Debugging
+
+    handlePing(line);
+
+    if (!alarmActive && line.indexOf("PRIVMSG") != -1 && line.indexOf("custom-reward-id=") != -1) {
+      processRewardMessage(line);
     }
   }
 }
