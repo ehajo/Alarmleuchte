@@ -1,0 +1,18 @@
+# Arduino build files und temporäre Dateien
+*.elf
+*.hex
+*.bin
+*.map
+*.o
+*.d
+
+# Arduino IDE Cache-Ordner
+*.ino.cache/
+
+# Build-Verzeichnisse (z.B. PlatformIO, falls verwendet)
+build/
+.pio/
+
+# Betriebssystem-spezifische Dateien
+.DS_Store
+Thumbs.db
