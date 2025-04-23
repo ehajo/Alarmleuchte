@@ -16,3 +16,5 @@ build/
 # Betriebssystem-spezifische Dateien
 .DS_Store
 Thumbs.db
+/pcb/001-Pulsonix
+pcb/002-Reports/alarmleuchte (Replace Part Report).txt
