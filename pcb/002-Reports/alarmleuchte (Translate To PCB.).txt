@@ -1,0 +1,20 @@
+Translate To PCB.
+-----------------
+
+Report Written : 25.04.2025 20:20:37
+Design Path    : C:\Users\Hannes\Documents\GitHub\Alarmleuchte\pcb\alarmleuchte.pcb
+Design Title   : 
+Created        : 25.04.2025 20:20:37
+Last Saved     : 
+Editing Time   : 0 min
+
+Error: TestPoint 'IO12' could not be added to the PCB Design.
+Check that you have defined a symbol to use.
+Error: TestPoint 'IO13' could not be added to the PCB Design.
+Check that you have defined a symbol to use.
+Error: TestPoint 'IO5' could not be added to the PCB Design.
+Check that you have defined a symbol to use.
+Error: TestPoint 'IO4' could not be added to the PCB Design.
+Check that you have defined a symbol to use.
+
+                ---------------- End Of Report ----------------
