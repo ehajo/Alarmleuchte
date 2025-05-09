@@ -2,8 +2,8 @@
 #include <ArduinoOTA.h>
 #include "config.h"  // Enthält WLAN- und Twitch-Zugangsdaten
 
-#define RELAY_PIN 16  // IO16: Relais-Steuerung
-#define DEBUG         // Aktiviere Debug-Ausgaben
+#define RELAY_PIN 14  // IO14: Relais-Steuerung
+// #define DEBUG         // Aktiviere Debug-Ausgaben
 #ifdef DEBUG
   #define DEBUG_PRINT(x) Serial.println(x)
 #else
@@ -144,7 +144,7 @@ void processRewardMessage(const String& line) {
   digitalWrite(RELAY_PIN, HIGH);
   client.print(F("PRIVMSG "));
   client.print(twitch_channel);
-  client.println(F(" :🚨🚨🚨 Alarm 🚨🚨🚨"));
+  client.println(F(" :ehajoAlarm ehajoAlarm ehajoAlarm "));
   alarmStartTime = millis();
   alarmActive = true;
 }
